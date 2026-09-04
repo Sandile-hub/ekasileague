@@ -11,16 +11,25 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// CORS – allow frontend URL (set in environment)
+// ----- CORS configuration -----
+const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:3000';
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  origin: allowedOrigin,          // Must be exact, with https://
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,              // If your frontend sends cookies / auth headers
+  optionsSuccessStatus: 200,      // Some legacy browsers choke on 204
 };
+
 app.use(cors(corsOptions));
+
+// Explicitly handle preflight (OPTIONS) for all routes – cors does this,
+// but we add an extra catch-all just in case.
+app.options('*', cors(corsOptions));
+
 app.use(express.json());
 
-// PostgreSQL connection pool
+// ----- PostgreSQL connection pool -----
 export const db = new Pool({
   host: process.env.DB_HOST || 'localhost',
   port: process.env.DB_PORT || 5432,
@@ -32,24 +41,31 @@ export const db = new Pool({
   idleTimeoutMillis: 30000,
 });
 
-// Test connection
+// Test the connection (but don't crash on failure – let the app start and log)
 try {
   await db.connect();
   console.log('✅ PostgreSQL connected successfully');
 } catch (err) {
   console.error('❌ PostgreSQL connection failed:', err.message);
-  process.exit(1);
+  console.log('⚠️  The server will still start, but database operations will fail.');
+  // We do NOT exit here, so you can check the logs and fix env vars without restarting.
 }
 
-// Routes
+// ----- Routes -----
 app.use('/api/tournaments', tournamentRoutes);
 app.use('/api/settings', settingsRoutes);
 
-// Health check
+// Health check (useful for Render's uptime monitoring)
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// 404 handler (optional – catches any undefined routes)
+app.use((req, res) => {
+  res.status(404).json({ error: 'Route not found' });
+});
+
+// Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });

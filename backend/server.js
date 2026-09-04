@@ -3,36 +3,28 @@ import cors from "cors";
 import dotenv from "dotenv";
 import pkg from "pg";
 const { Pool } = pkg;
-import tournamentRoutes from "./routes/tournaments.js";
-import settingsRoutes from "./routes/settings.js";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// ----- CORS configuration with fallback -----
+// ----- CORS configuration -----
 const allowedOrigin = process.env.FRONTEND_URL || "*";
 console.log(`🌐 CORS allowed origin: ${allowedOrigin}`);
 
 const corsOptions = {
   origin: allowedOrigin,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: [
-    "Content-Type",
-    "Authorization",
-    "X-Requested-With",
-    "Accept",
-  ],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
   credentials: true,
   optionsSuccessStatus: 200,
 };
 
-// Apply CORS to all routes
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions)); // Handle preflight
+app.options("*", cors(corsOptions));
 
-// ----- Log every request (for debugging) -----
+// ----- Log every request -----
 app.use((req, res, next) => {
   console.log(`📝 ${req.method} ${req.path} - Origin: ${req.headers.origin}`);
   next();
@@ -52,7 +44,6 @@ export const db = new Pool({
   idleTimeoutMillis: 30000,
 });
 
-// Test connection (but don't crash)
 try {
   await db.connect();
   console.log("✅ PostgreSQL connected successfully");
@@ -60,16 +51,57 @@ try {
   console.error("❌ PostgreSQL connection failed:", err.message);
 }
 
-// ----- Routes -----
+// ----- Load routes with error handling -----
+let tournamentRoutes, settingsRoutes;
+
+try {
+  tournamentRoutes = (await import("./routes/tournaments.js")).default;
+  console.log("✅ Loaded tournaments routes");
+} catch (err) {
+  console.error("❌ Failed to load tournaments routes:", err.message);
+  tournamentRoutes = (req, res) => res.status(500).json({ error: "Tournaments routes not available" });
+}
+
+try {
+  settingsRoutes = (await import("./routes/settings.js")).default;
+  console.log("✅ Loaded settings routes");
+} catch (err) {
+  console.error("❌ Failed to load settings routes:", err.message);
+  settingsRoutes = (req, res) => res.status(500).json({ error: "Settings routes not available" });
+}
+
+// Mount routes
 app.use("/api/tournaments", tournamentRoutes);
 app.use("/api/settings", settingsRoutes);
 
-// Health check
+// ----- Test route (always works) -----
+app.get("/api/test", (req, res) => {
+  res.json({ message: "API is alive and well!" });
+});
+
+// ----- Health check -----
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// 404 handler
+// ----- Log all registered routes (for debugging) -----
+console.log("📋 Registered routes:");
+app._router.stack.forEach((layer) => {
+  if (layer.route) {
+    const methods = Object.keys(layer.route.methods).join(", ").toUpperCase();
+    console.log(`  ${methods} ${layer.route.path}`);
+  } else if (layer.name === "router") {
+    // nested routers (like our mounted ones)
+    layer.handle.stack.forEach((subLayer) => {
+      if (subLayer.route) {
+        const methods = Object.keys(subLayer.route.methods).join(", ").toUpperCase();
+        console.log(`  ${methods} ${subLayer.route.path}`);
+      }
+    });
+  }
+});
+
+// ----- 404 handler (should be last) -----
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
 });

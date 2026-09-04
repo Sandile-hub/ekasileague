@@ -3,6 +3,9 @@ import cors from "cors";
 import dotenv from "dotenv";
 import pkg from "pg";
 
+import tournamentRoutes from "./routes/tournaments.js";
+import settingsRoutes from "./routes/settings.js";
+
 const { Pool } = pkg;
 
 dotenv.config();
@@ -23,43 +26,42 @@ process.on("unhandledRejection", (err) => {
 });
 
 // =========================================================
-// CORS CONFIGURATION
+// CORS
 // =========================================================
 
-// Production frontend
-const productionFrontend =
-  process.env.FRONTEND_URL ||
-  "https://ekasileague-coral.vercel.app";
-
-// Allowed origins
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
   "https://ekasileague-coral.vercel.app",
-  productionFrontend,
-]
-  .filter(Boolean)
-  .map((origin) => origin.replace(/\/$/, ""));
+];
 
-// Remove duplicates
-const uniqueOrigins = [...new Set(allowedOrigins)];
+if (process.env.FRONTEND_URL) {
+  allowedOrigins.push(
+    process.env.FRONTEND_URL.replace(/\/$/, "")
+  );
+}
+
+const uniqueOrigins = [
+  ...new Set(
+    allowedOrigins
+      .filter(Boolean)
+      .map((origin) => origin.replace(/\/$/, ""))
+  ),
+];
 
 console.log("========================================");
-console.log("🌐 CORS CONFIGURATION");
+console.log("🌐 ALLOWED CORS ORIGINS");
 console.log("========================================");
-
-console.log("Allowed origins:");
 
 uniqueOrigins.forEach((origin) => {
-  console.log(`   ✅ ${origin}`);
+  console.log(`✅ ${origin}`);
 });
 
 console.log("========================================");
 
 const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests that don't contain an Origin header
-    // Examples: Postman, server-to-server requests
+  origin: (origin, callback) => {
+    // Requests without Origin
     if (!origin) {
       return callback(null, true);
     }
@@ -100,19 +102,17 @@ const corsOptions = {
   optionsSuccessStatus: 204,
 };
 
-// Apply CORS globally
 app.use(cors(corsOptions));
 
-// Explicit preflight handling
 app.options("*", cors(corsOptions));
 
 // =========================================================
-// REQUEST LOGGING
+// REQUEST LOGGER
 // =========================================================
 
 app.use((req, res, next) => {
   console.log(
-    `📝 ${req.method} ${req.path} - Origin: ${
+    `📝 ${req.method} ${req.originalUrl} | Origin: ${
       req.headers.origin || "none"
     }`
   );
@@ -159,25 +159,22 @@ export const db = new Pool({
   connectionTimeoutMillis: 10000,
 });
 
-// =========================================================
-// DATABASE ERROR HANDLER
-// =========================================================
-
+// Database errors
 db.on("error", (err) => {
   console.error(
-    "❌ Unexpected PostgreSQL pool error:",
-    err
+    "❌ PostgreSQL pool error:",
+    err.message
   );
 });
 
 // =========================================================
-// BASIC API TEST
+// BASIC TEST ROUTE
 // =========================================================
 
 app.get("/api/test", (req, res) => {
-  res.json({
+  res.status(200).json({
     success: true,
-    message: "Ekasi League API is alive and well!",
+    message: "Ekasi League API is alive!",
   });
 });
 
@@ -190,19 +187,19 @@ app.get("/api/health", async (req, res) => {
     await db.query("SELECT 1");
 
     res.status(200).json({
+      success: true,
       status: "ok",
       database: "connected",
-      environment:
-        process.env.NODE_ENV || "production",
       timestamp: new Date().toISOString(),
     });
-  } catch (err) {
+  } catch (error) {
     console.error(
-      "❌ Health check database error:",
-      err.message
+      "❌ Health check failed:",
+      error.message
     );
 
     res.status(503).json({
+      success: false,
       status: "error",
       database: "disconnected",
       timestamp: new Date().toISOString(),
@@ -211,7 +208,68 @@ app.get("/api/health", async (req, res) => {
 });
 
 // =========================================================
-// START SERVER IMMEDIATELY
+// API ROUTES
+// =========================================================
+
+console.log("⏳ Registering API routes...");
+
+app.use(
+  "/api/tournaments",
+  tournamentRoutes
+);
+
+console.log(
+  "✅ /api/tournaments registered"
+);
+
+app.use(
+  "/api/settings",
+  settingsRoutes
+);
+
+console.log(
+  "✅ /api/settings registered"
+);
+
+// =========================================================
+// 404 HANDLER
+// =========================================================
+
+app.use((req, res) => {
+  console.log(
+    `❌ 404: ${req.method} ${req.originalUrl}`
+  );
+
+  res.status(404).json({
+    success: false,
+    error: "Route not found",
+    path: req.originalUrl,
+  });
+});
+
+// =========================================================
+// ERROR HANDLER
+// =========================================================
+
+app.use((err, req, res, next) => {
+  console.error("💥 Express error:", err);
+
+  if (err.message?.startsWith("CORS blocked")) {
+    return res.status(403).json({
+      success: false,
+      error: "CORS error",
+      message: err.message,
+    });
+  }
+
+  res.status(500).json({
+    success: false,
+    error: "Internal server error",
+  });
+});
+
+// =========================================================
+// START SERVER
 // =========================================================
 
 const server = app.listen(
@@ -220,37 +278,22 @@ const server = app.listen(
   () => {
     console.log("");
     console.log("========================================");
-    console.log("🚀 EKASI LEAGUE BACKEND STARTED");
+    console.log("🚀 EKASI LEAGUE API RUNNING");
     console.log("========================================");
-    console.log(`🌐 Port: ${PORT}`);
-    console.log("📡 Host: 0.0.0.0");
-    console.log(
-      `🔗 API: http://localhost:${PORT}`
-    );
-    console.log(
-      `🔗 Health: http://localhost:${PORT}/api/health`
-    );
-    console.log(
-      `🔗 Test: http://localhost:${PORT}/api/test`
-    );
+    console.log(`🌐 PORT: ${PORT}`);
+    console.log("📡 HOST: 0.0.0.0");
     console.log("========================================");
     console.log("");
   }
 );
 
 // =========================================================
-// ROUTE INITIALIZATION
+// DATABASE INITIALIZATION
 // =========================================================
 
-async function initializeApp() {
-  console.log("⏳ Initializing Ekasi League API...");
-
-  // -------------------------------------------------------
-  // PostgreSQL
-  // -------------------------------------------------------
-
+async function initializeDatabase() {
   try {
-    console.log("⏳ Connecting to PostgreSQL...");
+    console.log("⏳ Testing PostgreSQL connection...");
 
     const client = await db.connect();
 
@@ -259,113 +302,15 @@ async function initializeApp() {
     );
 
     client.release();
-  } catch (err) {
+  } catch (error) {
     console.error(
       "❌ PostgreSQL connection failed:",
-      err.message
-    );
-
-    return;
-  }
-
-  // -------------------------------------------------------
-  // TOURNAMENT ROUTES
-  // -------------------------------------------------------
-
-  try {
-    const tournamentModule = await import(
-      "./routes/tournaments.js"
-    );
-
-    const tournamentRoutes =
-      tournamentModule.default;
-
-    if (!tournamentRoutes) {
-      throw new Error(
-        "tournaments.js does not export a default router"
-      );
-    }
-
-    app.use(
-      "/api/tournaments",
-      tournamentRoutes
-    );
-
-    console.log(
-      "✅ Loaded /api/tournaments routes"
-    );
-  } catch (err) {
-    console.error(
-      "❌ Failed to load tournament routes:",
-      err
+      error.message
     );
   }
-
-  // -------------------------------------------------------
-  // SETTINGS ROUTES
-  // -------------------------------------------------------
-
-  try {
-    const settingsModule = await import(
-      "./routes/settings.js"
-    );
-
-    const settingsRoutes =
-      settingsModule.default;
-
-    if (!settingsRoutes) {
-      throw new Error(
-        "settings.js does not export a default router"
-      );
-    }
-
-    app.use(
-      "/api/settings",
-      settingsRoutes
-    );
-
-    console.log(
-      "✅ Loaded /api/settings routes"
-    );
-  } catch (err) {
-    console.error(
-      "❌ Failed to load settings routes:",
-      err
-    );
-  }
-
-  // -------------------------------------------------------
-  // 404 HANDLER
-  // MUST ALWAYS BE LAST
-  // -------------------------------------------------------
-
-  app.use((req, res) => {
-    res.status(404).json({
-      success: false,
-      error: "Route not found",
-      path: req.originalUrl,
-    });
-  });
-
-  console.log("");
-  console.log("========================================");
-  console.log(
-    "✅ EKASI LEAGUE API INITIALIZATION COMPLETE"
-  );
-  console.log("========================================");
-  console.log("");
 }
 
-// =========================================================
-// INITIALIZE APPLICATION
-// =========================================================
-
-initializeApp().catch((err) => {
-  console.error(
-    "💥 Application initialization failed:",
-    err
-  );
-});
+initializeDatabase();
 
 // =========================================================
 // GRACEFUL SHUTDOWN
@@ -387,10 +332,10 @@ const shutdown = async (signal) => {
       console.log("✅ HTTP server closed");
 
       process.exit(0);
-    } catch (err) {
+    } catch (error) {
       console.error(
-        "❌ Error during shutdown:",
-        err.message
+        "❌ Shutdown error:",
+        error.message
       );
 
       process.exit(1);
